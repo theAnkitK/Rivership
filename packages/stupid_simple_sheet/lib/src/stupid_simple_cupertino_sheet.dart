@@ -21,7 +21,6 @@ class StupidSimpleCupertinoSheetRoute<T> extends PopupRoute<T>
     ),
     this.clearBarrierImmediately = true,
     this.snappingPoints = const [
-      SnappingPoint.relative(0),
       SnappingPoint.relative(1),
     ],
     this.initialSnap,
