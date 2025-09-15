@@ -60,12 +60,13 @@ class StupidSimpleCupertinoSheetRoute<T> extends PopupRoute<T>
   @override
   DelegatedTransitionBuilder? get delegatedTransition =>
       (context, animation, secondaryAnimation, canSnapshot, child) =>
-          CopiedCupertinoSheetTransition.delegateTransition(
+          CopiedCupertinoSheetTransitions.secondarySlideDownTransition(
             context,
-            animation.clamped,
-            secondaryAnimation.clamped,
-            allowSnapshotting,
-            child,
+            animation: animation.clamped,
+            secondaryAnimation: secondaryAnimation.clamped,
+            slideBackRange: _getTopTwoSnapPoints(context),
+            opacityRange: _getOpacityRange(context),
+            child: child,
           );
 
   @override
@@ -80,6 +81,40 @@ class StupidSimpleCupertinoSheetRoute<T> extends PopupRoute<T>
     );
   }
 
+  (double, double) _getTopTwoSnapPoints(BuildContext context) {
+    final lastSnapPoint = snappingPoints.isNotEmpty
+        ? snappingPoints.last
+        : const SnappingPoint.relative(1);
+
+    final secondLastSnapPoint = snappingPoints.length > 1
+        ? snappingPoints[snappingPoints.length - 2]
+        : const SnappingPoint.relative(0);
+
+    final height = MediaQuery.sizeOf(context).height;
+
+    return (
+      secondLastSnapPoint.toRelative(height),
+      lastSnapPoint.toRelative(height),
+    );
+  }
+
+  (double, double) _getOpacityRange(BuildContext context) {
+    final firstSnapPoint = snappingPoints.isNotEmpty
+        ? snappingPoints.first
+        : const SnappingPoint.relative(0);
+
+    final secondSnapPoint = snappingPoints.length > 1
+        ? snappingPoints[1]
+        : const SnappingPoint.relative(1);
+
+    final height = MediaQuery.sizeOf(context).height;
+
+    return (
+      firstSnapPoint.toRelative(height),
+      secondSnapPoint.toRelative(height),
+    );
+  }
+
   @override
   Widget buildTransitions(
     BuildContext context,
@@ -87,10 +122,12 @@ class StupidSimpleCupertinoSheetRoute<T> extends PopupRoute<T>
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    return CopiedCupertinoSheetTransition(
-      primaryRouteAnimation: animation.clamped,
-      secondaryRouteAnimation: secondaryAnimation.clamped,
-      linearTransition: true,
+    return CopiedCupertinoSheetTransitions.fullTransition(
+      context,
+      animation: animation.clamped,
+      secondaryAnimation: secondaryAnimation.clamped,
+      slideBackRange: _getTopTwoSnapPoints(context),
+      opacityRange: _getOpacityRange(context),
       child: child,
     );
   }
