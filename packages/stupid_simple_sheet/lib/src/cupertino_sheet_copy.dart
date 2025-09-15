@@ -6,6 +6,7 @@ library;
 import 'dart:math';
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 // Smoothing factor applied to the device's top padding (which approximates the corner radius)
@@ -32,29 +33,74 @@ const double _kSheetScaleFactor = 0.0835;
 final Animatable<double> _kScaleTween =
     Tween<double>(begin: 1.0, end: 1.0 - _kSheetScaleFactor);
 
-class CopiedCupertinoSheetTransition {
+class CopiedCupertinoSheetTransition extends StatefulWidget {
+  /// Creates an iOS style sheet transition.
+  const CopiedCupertinoSheetTransition({
+    super.key,
+    required this.primaryRouteAnimation,
+    required this.secondaryRouteAnimation,
+    required this.child,
+    required this.linearTransition,
+  });
+
+  /// `primaryRouteAnimation` is a linear route animation from 0.0 to 1.0 when
+  /// this screen is being pushed.
+  final Animation<double> primaryRouteAnimation;
+
+  /// `secondaryRouteAnimation` is a linear route animation from 0.0 to 1.0 when
+  /// another screen is being pushed on top of this one.
+  final Animation<double> secondaryRouteAnimation;
+
+  /// The widget below this widget in the tree.
+  final Widget child;
+
+  /// Whether to perform the transition linearly.
+  ///
+  /// Used to respond to a drag gesture.
+  final bool linearTransition;
+
+  static double _getRelativeTopPadding(
+    BuildContext context, {
+    double extraPadding = 0,
+    double minFraction = 0.05,
+  }) {
+    final safeArea = MediaQuery.paddingOf(context);
+    final height = MediaQuery.sizeOf(context).height;
+
+    if (height == 0) {
+      return minFraction;
+    }
+    // Ensure that the sheet moves down by at least 5% of the screen height if
+    // the safe area is very small (e.g. no notch).
+    return max((safeArea.top + extraPadding) / height, minFraction);
+  }
+
+  static Color _getOverlayColor(BuildContext context) {
+    final bool isDarkMode =
+        CupertinoTheme.brightnessOf(context) == Brightness.dark;
+    return isDarkMode ? const Color(0xFFc8c8c8) : const Color(0xFF000000);
+  }
+
   /// The primary delegated transition. Will slide a non [CupertinoSheetRoute] page down.
   ///
   /// Provided to the previous route to coordinate transitions between routes.
   ///
   /// If a [CupertinoSheetRoute] already exists in the stack, then it will
   /// slide the previous sheet upwards instead.
-  static Widget delegateTransition(
+  static Widget? delegateTransition(
     BuildContext context,
     Animation<double> animation,
     Animation<double> secondaryAnimation,
     bool allowSnapshotting,
     Widget? child,
   ) {
-    final safeArea = MediaQuery.paddingOf(context);
-    final height = MediaQuery.sizeOf(context).height;
-
-    // Ensure that the sheet moves down by at least 5% of the screen height if
-    // the safe area is very small (e.g. no notch).
-    final topFactor = max(safeArea.top / height, 0.05);
-
-    final Animatable<Offset> topDownTween =
-        Tween<Offset>(begin: Offset.zero, end: Offset(0, topFactor));
+    final Animatable<Offset> topDownTween = Tween<Offset>(
+      begin: Offset.zero,
+      end: Offset(
+        0,
+        _getRelativeTopPadding(context),
+      ),
+    );
 
     final double deviceCornerRadius =
         (MediaQuery.maybeViewPaddingOf(context)?.top ?? 0) *
@@ -72,35 +118,17 @@ class CopiedCupertinoSheetTransition {
 
     final Animation<BorderRadiusGeometry> radiusAnimation =
         secondaryAnimation.drive(decorationTween);
-    final Animation<double> opacityAnimation =
-        secondaryAnimation.drive(_kOpacityTween);
+
     final Animation<Offset> slideAnimation =
         secondaryAnimation.drive(topDownTween);
     final Animation<double> scaleAnimation =
         secondaryAnimation.drive(_kScaleTween);
 
-    final bool isDarkMode =
-        CupertinoTheme.brightnessOf(context) == Brightness.dark;
-    final Color overlayColor =
-        isDarkMode ? const Color(0xFFc8c8c8) : const Color(0xFF000000);
-
     final Widget? contrastedChild =
-        child != null && !secondaryAnimation.isDismissed
-            ? Stack(
-                children: <Widget>[
-                  child,
-                  IgnorePointer(
-                    child: FadeTransition(
-                      opacity: opacityAnimation,
-                      child: ColoredBox(
-                          color: overlayColor, child: const SizedBox.expand()),
-                    ),
-                  ),
-                ],
-              )
-            : child;
+        _getOverlayedChild(context, child, secondaryAnimation);
 
-    final double topGapHeight = MediaQuery.sizeOf(context).height * 0.08;
+    final double topGapHeight =
+        MediaQuery.sizeOf(context).height * _getRelativeTopPadding(context);
 
     return Stack(
       children: <Widget>[
@@ -134,4 +162,186 @@ class CopiedCupertinoSheetTransition {
       ],
     );
   }
+
+  static Widget? _getOverlayedChild(
+    BuildContext context,
+    Widget? child,
+    Animation<double> animation,
+  ) {
+    final opacity = animation.drive(_kOpacityTween);
+
+    final Color overlayColor =
+        CopiedCupertinoSheetTransition._getOverlayColor(context);
+
+    return Stack(
+      children: <Widget>[
+        if (child != null) child,
+        IgnorePointer(
+          child: FadeTransition(
+            opacity: opacity,
+            child: DecoratedBox(
+              decoration: BoxDecoration(color: overlayColor),
+              child: const SizedBox.expand(),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  State<CopiedCupertinoSheetTransition> createState() =>
+      _CupertinoSheetTransitionState();
+}
+
+class _CupertinoSheetTransitionState
+    extends State<CopiedCupertinoSheetTransition> {
+  CurvedAnimation? _primaryPositionCurve;
+
+  // The offset animation when this page is being covered by another sheet.
+  late Animation<Offset> _secondaryPositionAnimation;
+
+  // The scale animation when this page is being covered by another sheet.
+  late Animation<double> _secondaryScaleAnimation;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _disposeCurve();
+    _setupAnimation();
+  }
+
+  @override
+  void didUpdateWidget(covariant CopiedCupertinoSheetTransition oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.primaryRouteAnimation != widget.primaryRouteAnimation ||
+        oldWidget.secondaryRouteAnimation != widget.secondaryRouteAnimation) {
+      _disposeCurve();
+      _setupAnimation();
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposeCurve();
+    super.dispose();
+  }
+
+  void _setupAnimation() {
+    _primaryPositionCurve = CurvedAnimation(
+      curve: Curves.fastEaseInToSlowEaseOut,
+      reverseCurve: Curves.fastEaseInToSlowEaseOut.flipped,
+      parent: widget.primaryRouteAnimation,
+    );
+
+    _secondaryPositionAnimation = widget.secondaryRouteAnimation.drive(
+      Tween<Offset>(
+        begin: Offset(0, 0),
+        end: Offset(
+          0,
+          -CopiedCupertinoSheetTransition._getRelativeTopPadding(
+            context,
+            extraPadding: 16,
+            minFraction: 0.0,
+          ),
+        ),
+      ),
+    );
+
+    _secondaryScaleAnimation =
+        widget.secondaryRouteAnimation.drive(_kScaleTween);
+  }
+
+  void _disposeCurve() {
+    _primaryPositionCurve?.dispose();
+    _primaryPositionCurve = null;
+  }
+
+  Widget _coverSheetPrimaryTransition(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget? child,
+  ) {
+    final Animatable<Offset> offsetTween = Tween<Offset>(
+      begin: Offset(0, 1),
+      end: Offset(0, 0),
+    );
+
+    final radiusTween = BorderRadiusTween(
+      begin: BorderRadius.circular(12),
+      end: BorderRadius.circular(8),
+    );
+
+    final Animation<Offset> positionAnimation = animation.drive(offsetTween);
+
+    return SlideTransition(
+      position: positionAnimation,
+      child: ValueListenableBuilder(
+        valueListenable: secondaryAnimation.drive(radiusTween),
+        builder: (context, value, child) {
+          return ClipRSuperellipse(
+            borderRadius: value!,
+            child: child,
+          );
+        },
+        child: child,
+      ),
+    );
+  }
+
+  Widget _coverSheetSecondaryTransition(
+      Animation<double> secondaryAnimation, Widget? child) {
+    return SlideTransition(
+      position: _secondaryPositionAnimation,
+      transformHitTests: false,
+      child: ScaleTransition(
+        scale: _secondaryScaleAnimation,
+        filterQuality: FilterQuality.medium,
+        alignment: Alignment.topCenter,
+        child: CopiedCupertinoSheetTransition._getOverlayedChild(
+          context,
+          child,
+          secondaryAnimation,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      left: false,
+      right: false,
+      bottom: false,
+      minimum: EdgeInsets.only(top: MediaQuery.sizeOf(context).height * 0.05),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 16),
+        child: SizedBox.expand(
+          child: _coverSheetSecondaryTransition(
+            widget.secondaryRouteAnimation,
+            _coverSheetPrimaryTransition(
+              context,
+              widget.primaryRouteAnimation,
+              widget.secondaryRouteAnimation,
+              widget.child,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Internally used to see if another sheet is in the tree already.
+@internal
+class StupidCupertinoSheetScope extends InheritedWidget {
+  const StupidCupertinoSheetScope({required super.child});
+
+  static StupidCupertinoSheetScope? maybeOf(BuildContext context) {
+    return context.getInheritedWidgetOfExactType<StupidCupertinoSheetScope>();
+  }
+
+  @override
+  bool updateShouldNotify(StupidCupertinoSheetScope oldWidget) => false;
 }

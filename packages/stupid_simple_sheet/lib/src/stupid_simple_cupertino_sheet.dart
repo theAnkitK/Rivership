@@ -70,19 +70,12 @@ class StupidSimpleCupertinoSheetRoute<T> extends PopupRoute<T>
 
   @override
   Widget buildContent(BuildContext context) {
-    final topPadding = MediaQuery.heightOf(context) * 0.08;
     return MediaQuery.removePadding(
       context: context,
       removeTop: true,
-      child: Padding(
-        padding: EdgeInsets.only(top: topPadding),
-        child: ClipRSuperellipse(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-          child: CupertinoUserInterfaceLevel(
-            data: CupertinoUserInterfaceLevelData.elevated,
-            child: child,
-          ),
-        ),
+      child: CupertinoUserInterfaceLevel(
+        data: CupertinoUserInterfaceLevelData.elevated,
+        child: child,
       ),
     );
   }
@@ -94,11 +87,34 @@ class StupidSimpleCupertinoSheetRoute<T> extends PopupRoute<T>
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    return CupertinoSheetTransition(
+    return CopiedCupertinoSheetTransition(
       primaryRouteAnimation: animation.clamped,
       secondaryRouteAnimation: secondaryAnimation.clamped,
       linearTransition: true,
       child: child,
     );
+  }
+
+  @override
+  bool canTransitionTo(TransitionRoute<dynamic> nextRoute) {
+    return nextRoute is StupidSimpleCupertinoSheetRoute;
+  }
+
+  @override
+  void didChangeNext(Route<dynamic>? nextRoute) {
+    super.didChangeNext(nextRoute);
+    if (nextRoute is StupidSimpleCupertinoSheetRoute) {
+      // ignore: invalid_use_of_visible_for_testing_member
+      receivedTransition = null;
+    }
+  }
+
+  @override
+  void didPopNext(Route<dynamic> nextRoute) {
+    super.didPopNext(nextRoute);
+    if (nextRoute is StupidSimpleCupertinoSheetRoute) {
+      // ignore: invalid_use_of_visible_for_testing_member
+      receivedTransition = null;
+    }
   }
 }
